@@ -34,18 +34,23 @@ class Register(APIView):
         )
 
         # Assign user type and create profile
-        user_type = data.get("user_type")  # expected: student, teacher, admin
+        user_type = data.get("user_type", "STUDENT").upper()  # Convert to uppercase
+        
+        # Set user_type on the user model
+        user.user_type = user_type
+        user.save()
 
-        if user_type == "student":
-            Student.objects.create(user=user)
-        elif user_type == "teacher":
-            Teacher.objects.create(user=user)
-        elif user_type == "parent":
-            Parent.objects.create(user=user)
-        elif user_type == "admin":
+        if user_type == "STUDENT":
+            Student.objects.create(user=user, username=user.username, name=user.first_name, surname=user.last_name)
+        elif user_type == "TEACHER":
+            Teacher.objects.create(user=user, username=user.username, name=user.first_name, surname=user.last_name)
+        elif user_type == "PARENT":
+            Parent.objects.create(user=user, username=user.username, name=user.first_name, surname=user.last_name, email=user.email)
+        elif user_type == "ADMIN":
             user.is_staff = True
             user.is_superuser = True
             user.save()
+            Admin.objects.create(user=user, username=user.username)
 
         # Serialize basic user data
         serializer = UserSerializer(user)
@@ -67,8 +72,13 @@ class Login(APIView):
             if user.is_active:
                 # Generate JWT tokens
                 refresh = RefreshToken.for_user(user)
+                
+                # Serialize user data
+                user_serializer = UserSerializer(user)
+                user_data = user_serializer.data
+                
                 return Response({
-                    "message": "Login Successful",
+                    "user": user_data,
                     "refresh": str(refresh),
                     "access": str(refresh.access_token),
                 }, status=status.HTTP_200_OK)
