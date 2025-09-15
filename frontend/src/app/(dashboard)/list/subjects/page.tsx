@@ -1,22 +1,28 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import FormContainer from "@/components/FormContainer";
 import Pagination from "@/components/Pagination";
 import Table from "@/components/Table";
 import TableSearch from "@/components/TableSearch";
-import prisma from "@/lib/prisma";
 import { ITEM_PER_PAGE } from "@/lib/settings";
-import { Prisma, Subject, Teacher } from "@prisma/client";
+import { Subject, Teacher } from "@/lib/types";
+import { mockDataService } from "@/services/apiService";
 import Image from "next/image";
-import { auth } from "@clerk/nextjs/server";
 
 type SubjectList = Subject & { teachers: Teacher[] };
 
-const SubjectListPage = async ({
-  searchParams,
-}: {
+interface SubjectListPageProps {
   searchParams: { [key: string]: string | undefined };
-}) => {
-  const { sessionClaims } = auth();
-  const role = (sessionClaims?.metadata as { role?: string })?.role;
+}
+
+const SubjectListPage = ({ searchParams }: SubjectListPageProps) => {
+  const { user } = useSelector((state: RootState) => state.auth);
+  const role = user?.user_type?.toLowerCase() || "student";
+  const [data, setData] = useState<SubjectList[]>([]);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const columns = [
     {
@@ -56,39 +62,69 @@ const SubjectListPage = async ({
     </tr>
   );
 
-  const { page, ...queryParams } = searchParams;
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const { page, ...queryParams } = searchParams;
+        const p = page ? parseInt(page) : 1;
 
-  const p = page ? parseInt(page) : 1;
-
-  // URL PARAMS CONDITION
-
-  const query: Prisma.SubjectWhereInput = {};
-
-  if (queryParams) {
-    for (const [key, value] of Object.entries(queryParams)) {
-      if (value !== undefined) {
-        switch (key) {
-          case "search":
-            query.name = { contains: value, mode: "insensitive" };
-            break;
-          default:
-            break;
+        // Build query object for filtering
+        const query: any = {};
+        
+        if (queryParams) {
+          for (const [key, value] of Object.entries(queryParams)) {
+            if (value !== undefined) {
+              switch (key) {
+                case "search":
+                  query.search = value;
+                  break;
+                default:
+                  break;
+              }
+            }
+          }
         }
-      }
-    }
-  }
 
-  const [data, count] = await prisma.$transaction([
-    prisma.subject.findMany({
-      where: query,
-      include: {
-        teachers: true,
-      },
-      take: ITEM_PER_PAGE,
-      skip: ITEM_PER_PAGE * (p - 1),
-    }),
-    prisma.subject.count({ where: query }),
-  ]);
+        // Use mock data service temporarily
+        const [subjectsData, subjectsCount] = await mockDataService.$transaction([
+          mockDataService.subjects.findMany({
+            where: query,
+            include: {
+              teachers: true,
+            },
+            take: ITEM_PER_PAGE,
+            skip: ITEM_PER_PAGE * (p - 1),
+          }),
+          mockDataService.subjects.count({ where: query }),
+        ]);
+        
+        setData(subjectsData);
+        setCount(subjectsCount);
+      } catch (error) {
+        console.error('Error fetching subjects:', error);
+        setData([]);
+        setCount(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchData();
+  }, [searchParams]);
+  
+  const { page } = searchParams;
+  const p = page ? parseInt(page) : 1;
+  
+  if (loading) {
+    return (
+      <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">

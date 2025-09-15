@@ -1,39 +1,72 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import Announcements from "@/components/Announcements";
 import BigCalendarContainer from "@/components/BigCalendarContainer";
 import BigCalendar from "@/components/BigCalender";
 import FormContainer from "@/components/FormContainer";
 import Performance from "@/components/Performance";
-import prisma from "@/lib/prisma";
-import { auth } from "@clerk/nextjs/server";
-import { Teacher } from "@prisma/client";
+import { mockDataService } from "@/services/apiService";
+import { Teacher } from "@/lib/types";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-const SingleTeacherPage = async ({
+const SingleTeacherPage = ({
   params: { id },
 }: {
   params: { id: string };
 }) => {
-  const { sessionClaims } = auth();
-  const role = (sessionClaims?.metadata as { role?: string })?.role;
+  const { user } = useSelector((state: RootState) => state.auth);
+  const role = user?.user_type?.toLowerCase() || "teacher";
+  const [teacher, setTeacher] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const teacher:
-    | (Teacher & {
-        _count: { subjects: number; lessons: number; classes: number };
-      })
-    | null = await prisma.teacher.findUnique({
-    where: { id },
-    include: {
-      _count: {
-        select: {
-          subjects: true,
-          lessons: true,
-          classes: true,
-        },
-      },
-    },
-  });
+  useEffect(() => {
+    const fetchTeacher = async () => {
+      try {
+        const teacherData = await mockDataService.teachers.findUnique({
+          where: { id },
+        });
+        // Mock teacher data structure
+        const mockTeacher = {
+          id,
+          name: "Jane",
+          surname: "Smith",
+          img: "/noAvatar.png",
+          bloodType: "A+",
+          birthday: new Date('1985-05-20'),
+          email: "jane.smith@school.com",
+          phone: "+1234567890",
+          address: "123 School St",
+          _count: {
+            subjects: 3,
+            lessons: 15,
+            classes: 2
+          }
+        };
+        setTeacher(mockTeacher);
+      } catch (error) {
+        console.error('Error fetching teacher:', error);
+        setTeacher(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTeacher();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex-1 p-4">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      </div>
+    );
+  }
 
   if (!teacher) {
     return notFound();

@@ -1,23 +1,27 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import FormContainer from "@/components/FormContainer";
 import Pagination from "@/components/Pagination";
 import Table from "@/components/Table";
 import TableSearch from "@/components/TableSearch";
-import prisma from "@/lib/prisma";
-import { Class, Prisma, Subject, Teacher } from "@prisma/client";
+import { TeacherList } from "@/lib/types";
 import Image from "next/image";
 import Link from "next/link";
 import { ITEM_PER_PAGE } from "@/lib/settings";
-import { auth } from "@clerk/nextjs/server";
+import { mockDataService } from "@/services/apiService";
 
-type TeacherList = Teacher & { subjects: Subject[] } & { classes: Class[] };
-
-const TeacherListPage = async ({
-  searchParams,
-}: {
+interface TeacherListPageProps {
   searchParams: { [key: string]: string | undefined };
-}) => {
-  const { sessionClaims } = auth();
-  const role = (sessionClaims?.metadata as { role?: string })?.role;
+}
+
+const TeacherListPage = ({ searchParams }: TeacherListPageProps) => {
+  const { user } = useSelector((state: RootState) => state.auth);
+  const role = user?.user_type?.toLowerCase() || "teacher";
+  const [data, setData] = useState<TeacherList[]>([]);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const columns = [
     {
       header: "Info",
@@ -102,47 +106,73 @@ const TeacherListPage = async ({
       </td>
     </tr>
   );
-  const { page, ...queryParams } = searchParams;
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const { page, ...queryParams } = searchParams;
+        const p = page ? parseInt(page) : 1;
 
-  const p = page ? parseInt(page) : 1;
-
-  // URL PARAMS CONDITION
-
-  const query: Prisma.TeacherWhereInput = {};
-
-  if (queryParams) {
-    for (const [key, value] of Object.entries(queryParams)) {
-      if (value !== undefined) {
-        switch (key) {
-          case "classId":
-            query.lessons = {
-              some: {
-                classId: parseInt(value),
-              },
-            };
-            break;
-          case "search":
-            query.name = { contains: value, mode: "insensitive" };
-            break;
-          default:
-            break;
+        // Build query object for filtering
+        const query: any = {};
+        
+        if (queryParams) {
+          for (const [key, value] of Object.entries(queryParams)) {
+            if (value !== undefined) {
+              switch (key) {
+                case "classId":
+                  query.classId = parseInt(value);
+                  break;
+                case "search":
+                  query.search = value;
+                  break;
+                default:
+                  break;
+              }
+            }
+          }
         }
-      }
-    }
-  }
 
-  const [data, count] = await prisma.$transaction([
-    prisma.teacher.findMany({
-      where: query,
-      include: {
-        subjects: true,
-        classes: true,
-      },
-      take: ITEM_PER_PAGE,
-      skip: ITEM_PER_PAGE * (p - 1),
-    }),
-    prisma.teacher.count({ where: query }),
-  ]);
+        // Use mock data service temporarily
+        const [teachersData, teachersCount] = await mockDataService.$transaction([
+          mockDataService.teachers.findMany({
+            where: query,
+            include: {
+              subjects: true,
+              classes: true,
+            },
+            take: ITEM_PER_PAGE,
+            skip: ITEM_PER_PAGE * (p - 1),
+          }),
+          mockDataService.teachers.count({ where: query }),
+        ]);
+        
+        setData(teachersData);
+        setCount(teachersCount);
+      } catch (error) {
+        console.error('Error fetching teachers:', error);
+        setData([]);
+        setCount(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchData();
+  }, [searchParams]);
+  
+  const { page } = searchParams;
+  const p = page ? parseInt(page) : 1;
+  
+  if (loading) {
+    return (
+      <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">

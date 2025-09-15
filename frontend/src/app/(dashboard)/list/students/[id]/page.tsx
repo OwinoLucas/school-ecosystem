@@ -1,34 +1,72 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import Announcements from "@/components/Announcements";
 import BigCalendarContainer from "@/components/BigCalendarContainer";
 import FormContainer from "@/components/FormContainer";
 import Performance from "@/components/Performance";
 import StudentAttendanceCard from "@/components/StudentAttendanceCard";
-import prisma from "@/lib/prisma";
-import { auth } from "@clerk/nextjs/server";
-import { Class, Student } from "@prisma/client";
+import { mockDataService } from "@/services/apiService";
+import { Student } from "@/lib/types";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
-const SingleStudentPage = async ({
+const SingleStudentPage = ({
   params: { id },
 }: {
   params: { id: string };
 }) => {
-  const { sessionClaims } = auth();
-  const role = (sessionClaims?.metadata as { role?: string })?.role;
+  const { user } = useSelector((state: RootState) => state.auth);
+  const role = user?.user_type?.toLowerCase() || "student";
+  const [student, setStudent] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const student:
-    | (Student & {
-        class: Class & { _count: { lessons: number } };
-      })
-    | null = await prisma.student.findUnique({
-    where: { id },
-    include: {
-      class: { include: { _count: { select: { lessons: true } } } },
-    },
-  });
+  useEffect(() => {
+    const fetchStudent = async () => {
+      try {
+        const studentData = await mockDataService.students.findUnique({
+          where: { id },
+        });
+        // Mock the student data structure expected by the component
+        const mockStudent = {
+          id,
+          name: "John",
+          surname: "Doe",
+          img: "/noAvatar.png",
+          bloodType: "O+",
+          birthday: new Date('2005-01-15'),
+          email: "john.doe@example.com",
+          phone: "+1234567890",
+          class: {
+            id: 1,
+            name: "5A",
+            _count: { lessons: 10 }
+          }
+        };
+        setStudent(mockStudent);
+      } catch (error) {
+        console.error('Error fetching student:', error);
+        setStudent(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStudent();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex-1 p-4">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      </div>
+    );
+  }
 
   if (!student) {
     return notFound();

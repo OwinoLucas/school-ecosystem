@@ -1,25 +1,26 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import FormContainer from "@/components/FormContainer";
 import Pagination from "@/components/Pagination";
 import Table from "@/components/Table";
 import TableSearch from "@/components/TableSearch";
-import prisma from "@/lib/prisma";
 import { ITEM_PER_PAGE } from "@/lib/settings";
-import { Parent, Prisma, Student } from "@prisma/client";
+import { ParentList } from "@/lib/types";
+import { mockDataService } from "@/services/apiService";
 import Image from "next/image";
 
-import { auth } from "@clerk/nextjs/server";
-
-type ParentList = Parent & { students: Student[] };
-
-const ParentListPage = async ({
-  searchParams,
-}: {
+interface ParentListPageProps {
   searchParams: { [key: string]: string | undefined };
-}) => {
+}
 
-const { sessionClaims } = auth();
-const role = (sessionClaims?.metadata as { role?: string })?.role;
-
+const ParentListPage = ({ searchParams }: ParentListPageProps) => {
+  const { user } = useSelector((state: RootState) => state.auth);
+  const role = user?.user_type?.toLowerCase() || "student";
+  const [data, setData] = useState<ParentList[]>([]);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
 const columns = [
   {
@@ -80,39 +81,69 @@ const renderRow = (item: ParentList) => (
   </tr>
 );
 
-  const { page, ...queryParams } = searchParams;
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const { page, ...queryParams } = searchParams;
+        const p = page ? parseInt(page) : 1;
 
-  const p = page ? parseInt(page) : 1;
-
-  // URL PARAMS CONDITION
-
-  const query: Prisma.ParentWhereInput = {};
-
-  if (queryParams) {
-    for (const [key, value] of Object.entries(queryParams)) {
-      if (value !== undefined) {
-        switch (key) {
-          case "search":
-            query.name = { contains: value, mode: "insensitive" };
-            break;
-          default:
-            break;
+        // Build query object for filtering
+        const query: any = {};
+        
+        if (queryParams) {
+          for (const [key, value] of Object.entries(queryParams)) {
+            if (value !== undefined) {
+              switch (key) {
+                case "search":
+                  query.search = value;
+                  break;
+                default:
+                  break;
+              }
+            }
+          }
         }
-      }
-    }
-  }
 
-  const [data, count] = await prisma.$transaction([
-    prisma.parent.findMany({
-      where: query,
-      include: {
-        students: true,
-      },
-      take: ITEM_PER_PAGE,
-      skip: ITEM_PER_PAGE * (p - 1),
-    }),
-    prisma.parent.count({ where: query }),
-  ]);
+        // Use mock data service temporarily
+        const [parentsData, parentsCount] = await mockDataService.$transaction([
+          mockDataService.parents.findMany({
+            where: query,
+            include: {
+              students: true,
+            },
+            take: ITEM_PER_PAGE,
+            skip: ITEM_PER_PAGE * (p - 1),
+          }),
+          mockDataService.parents.count({ where: query }),
+        ]);
+        
+        setData(parentsData);
+        setCount(parentsCount);
+      } catch (error) {
+        console.error('Error fetching parents:', error);
+        setData([]);
+        setCount(0);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchData();
+  }, [searchParams]);
+  
+  const { page } = searchParams;
+  const p = page ? parseInt(page) : 1;
+  
+  if (loading) {
+    return (
+      <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">

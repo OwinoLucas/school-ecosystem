@@ -1,13 +1,14 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import FormContainer from "@/components/FormContainer";
 import Pagination from "@/components/Pagination";
 import Table from "@/components/Table";
 import TableSearch from "@/components/TableSearch";
-import prisma from "@/lib/prisma";
 import { ITEM_PER_PAGE } from "@/lib/settings";
-import { Prisma } from "@prisma/client";
+import { mockDataService } from "@/services/apiService";
 import Image from "next/image";
-
-import { auth } from "@clerk/nextjs/server";
 
 type ResultList = {
   id: number;
@@ -22,15 +23,17 @@ type ResultList = {
 };
 
 
-const ResultListPage = async ({
-  searchParams,
-}: {
+interface ResultListPageProps {
   searchParams: { [key: string]: string | undefined };
-}) => {
+}
 
-const { userId, sessionClaims } = auth();
-const role = (sessionClaims?.metadata as { role?: string })?.role;
-const currentUserId = userId;
+const ResultListPage = ({ searchParams }: ResultListPageProps) => {
+  const { user } = useSelector((state: RootState) => state.auth);
+  const role = user?.user_type?.toLowerCase() || "student";
+  const currentUserId = user?.id?.toString() || "";
+  const [data, setData] = useState<ResultList[]>([]);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
 
 const columns = [
@@ -100,110 +103,129 @@ const renderRow = (item: ResultList) => (
   </tr>
 );
 
-  const { page, ...queryParams } = searchParams;
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const { page, ...queryParams } = searchParams;
+        const p = page ? parseInt(page) : 1;
 
-  const p = page ? parseInt(page) : 1;
+        // Build query object for filtering
+        const query: any = {};
+        
+        if (queryParams) {
+          for (const [key, value] of Object.entries(queryParams)) {
+            if (value !== undefined) {
+              switch (key) {
+                case "studentId":
+                  query.studentId = value;
+                  break;
+                case "search":
+                  query.search = value;
+                  break;
+                default:
+                  break;
+              }
+            }
+          }
+        }
 
-  // URL PARAMS CONDITION
-
-  const query: Prisma.ResultWhereInput = {};
-
-  if (queryParams) {
-    for (const [key, value] of Object.entries(queryParams)) {
-      if (value !== undefined) {
-        switch (key) {
-          case "studentId":
-            query.studentId = value;
+        // Role-based filtering
+        switch (role) {
+          case "admin":
             break;
-          case "search":
-            query.OR = [
-              { exam: { title: { contains: value, mode: "insensitive" } } },
-              { student: { name: { contains: value, mode: "insensitive" } } },
-            ];
+          case "teacher":
+            query.teacherId = currentUserId;
+            break;
+          case "student":
+            query.studentId = currentUserId;
+            break;
+          case "parent":
+            query.parentId = currentUserId;
             break;
           default:
             break;
         }
+
+        // Use mock data service temporarily
+        const [dataRes, resultsCount] = await mockDataService.$transaction([
+          mockDataService.results.findMany({
+            where: query,
+            include: {
+              student: { select: { name: true, surname: true } },
+              exam: {
+                include: {
+                  lesson: {
+                    select: {
+                      class: { select: { name: true } },
+                      teacher: { select: { name: true, surname: true } },
+                    },
+                  },
+                },
+              },
+              assignment: {
+                include: {
+                  lesson: {
+                    select: {
+                      class: { select: { name: true } },
+                      teacher: { select: { name: true, surname: true } },
+                    },
+                  },
+                },
+              },
+            },
+            take: ITEM_PER_PAGE,
+            skip: ITEM_PER_PAGE * (p - 1),
+          }),
+          mockDataService.results.count({ where: query }),
+        ]);
+        
+        const processedData = dataRes.map((item: any) => {
+          const assessment = item.exam || item.assignment;
+          
+          if (!assessment) return null;
+          
+          const isExam = "startTime" in assessment;
+          
+          return {
+            id: item.id,
+            title: assessment.title,
+            studentName: item.student.name,
+            studentSurname: item.student.surname,
+            teacherName: assessment.lesson.teacher.name,
+            teacherSurname: assessment.lesson.teacher.surname,
+            score: item.score,
+            className: assessment.lesson.class.name,
+            startTime: isExam ? assessment.startTime : assessment.startDate,
+          };
+        }).filter(Boolean);
+        
+        setData(processedData);
+        setCount(resultsCount);
+      } catch (error) {
+        console.error('Error fetching results:', error);
+        setData([]);
+        setCount(0);
+      } finally {
+        setLoading(false);
       }
-    }
-  }
-
-  // ROLE CONDITIONS
-
-  switch (role) {
-    case "admin":
-      break;
-    case "teacher":
-      query.OR = [
-        { exam: { lesson: { teacherId: currentUserId! } } },
-        { assignment: { lesson: { teacherId: currentUserId! } } },
-      ];
-      break;
-
-    case "student":
-      query.studentId = currentUserId!;
-      break;
-
-    case "parent":
-      query.student = {
-        parentId: currentUserId!,
-      };
-      break;
-    default:
-      break;
-  }
-
-  const [dataRes, count] = await prisma.$transaction([
-    prisma.result.findMany({
-      where: query,
-      include: {
-        student: { select: { name: true, surname: true } },
-        exam: {
-          include: {
-            lesson: {
-              select: {
-                class: { select: { name: true } },
-                teacher: { select: { name: true, surname: true } },
-              },
-            },
-          },
-        },
-        assignment: {
-          include: {
-            lesson: {
-              select: {
-                class: { select: { name: true } },
-                teacher: { select: { name: true, surname: true } },
-              },
-            },
-          },
-        },
-      },
-      take: ITEM_PER_PAGE,
-      skip: ITEM_PER_PAGE * (p - 1),
-    }),
-    prisma.result.count({ where: query }),
-  ]);
-
-  const data = dataRes.map((item) => {
-    const assessment = item.exam || item.assignment;
-
-    if (!assessment) return null;
-
-    const isExam = "startTime" in assessment;
-
-    return {
-      id: item.id,
-      title: assessment.title,
-      studentName: item.student.name,
-      studentSurname: item.student.surname,
-      teacherName: assessment.lesson.teacher.name,
-      teacherSurname: assessment.lesson.teacher.surname,
-      score: item.score,
-      className: assessment.lesson.class.name,
-      startTime: isExam ? assessment.startTime : assessment.startDate,
     };
-  });
+    
+    fetchData();
+  }, [searchParams, role, currentUserId]);
+  
+  const { page } = searchParams;
+  const p = page ? parseInt(page) : 1;
+  
+  if (loading) {
+    return (
+      <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">

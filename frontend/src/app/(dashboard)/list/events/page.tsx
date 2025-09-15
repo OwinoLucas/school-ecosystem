@@ -1,24 +1,29 @@
+"use client";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import FormContainer from "@/components/FormContainer";
 import Pagination from "@/components/Pagination";
 import Table from "@/components/Table";
 import TableSearch from "@/components/TableSearch";
-import prisma from "@/lib/prisma";
 import { ITEM_PER_PAGE } from "@/lib/settings";
-import { Class, Event, Prisma } from "@prisma/client";
+import { Class, Event } from "@/lib/types";
+import { mockDataService } from "@/services/apiService";
 import Image from "next/image";
-import { auth } from "@clerk/nextjs/server";
 
-type EventList = Event & { class: Class };
+type EventList = Event & { class: Class | null };
 
-const EventListPage = async ({
-  searchParams,
-}: {
+interface EventListPageProps {
   searchParams: { [key: string]: string | undefined };
-}) => {
+}
 
-  const { userId, sessionClaims } = auth();
-  const role = (sessionClaims?.metadata as { role?: string })?.role;
-  const currentUserId = userId;
+const EventListPage = ({ searchParams }: EventListPageProps) => {
+  const { user } = useSelector((state: RootState) => state.auth);
+  const role = user?.user_type?.toLowerCase() || "student";
+  const currentUserId = user?.id?.toString() || "";
+  const [data, setData] = useState<EventList[]>([]);
+  const [count, setCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const columns = [
     {
@@ -91,54 +96,86 @@ const EventListPage = async ({
     </tr>
   );
 
-  const { page, ...queryParams } = searchParams;
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const { page, ...queryParams } = searchParams;
+        const p = page ? parseInt(page) : 1;
 
-  const p = page ? parseInt(page) : 1;
+        // Build query object for filtering
+        const query: any = {};
+        
+        if (queryParams) {
+          for (const [key, value] of Object.entries(queryParams)) {
+            if (value !== undefined) {
+              switch (key) {
+                case "search":
+                  query.search = value;
+                  break;
+                default:
+                  break;
+              }
+            }
+          }
+        }
 
-  // URL PARAMS CONDITION
-
-  const query: Prisma.EventWhereInput = {};
-
-  if (queryParams) {
-    for (const [key, value] of Object.entries(queryParams)) {
-      if (value !== undefined) {
-        switch (key) {
-          case "search":
-            query.title = { contains: value, mode: "insensitive" };
+        // Role-based filtering
+        switch (role) {
+          case "admin":
+            break;
+          case "teacher":
+            query.teacherId = currentUserId;
+            break;
+          case "student":
+            query.studentId = currentUserId;
+            break;
+          case "parent":
+            query.parentId = currentUserId;
             break;
           default:
             break;
         }
+
+        // Use mock data service temporarily
+        const [eventsData, eventsCount] = await mockDataService.$transaction([
+          mockDataService.events.findMany({
+            where: query,
+            include: {
+              class: true,
+            },
+            take: ITEM_PER_PAGE,
+            skip: ITEM_PER_PAGE * (p - 1),
+          }),
+          mockDataService.events.count({ where: query }),
+        ]);
+        
+        setData(eventsData);
+        setCount(eventsCount);
+      } catch (error) {
+        console.error('Error fetching events:', error);
+        setData([]);
+        setCount(0);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
+    
+    fetchData();
+  }, [searchParams, role, currentUserId]);
+  
+  const { page } = searchParams;
+  const p = page ? parseInt(page) : 1;
+  
+  if (loading) {
+    return (
+      <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      </div>
+    );
   }
-
-  // ROLE CONDITIONS
-
-  const roleConditions = {
-    teacher: { lessons: { some: { teacherId: currentUserId! } } },
-    student: { students: { some: { id: currentUserId! } } },
-    parent: { students: { some: { parentId: currentUserId! } } },
-  };
-
-  query.OR = [
-    { classId: null },
-    {
-      class: roleConditions[role as keyof typeof roleConditions] || {},
-    },
-  ];
-
-  const [data, count] = await prisma.$transaction([
-    prisma.event.findMany({
-      where: query,
-      include: {
-        class: true,
-      },
-      take: ITEM_PER_PAGE,
-      skip: ITEM_PER_PAGE * (p - 1),
-    }),
-    prisma.event.count({ where: query }),
-  ]);
 
   return (
     <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">

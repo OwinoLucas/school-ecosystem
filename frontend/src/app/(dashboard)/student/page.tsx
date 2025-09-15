@@ -21,11 +21,7 @@ const StudentPage = () => {
       .then((data) => setclassItem(data));
   }, [userId]);
 
-  // const classItem = await prisma.class.findMany({
-  //   where: {
-  //     students: { some: { id: userId! } },
-  //   },
-  // });
+
 
   console.log(classItem);
   return (
